@@ -131,7 +131,7 @@ The store uses a fixed minimum width, /8/, key sequence for the list
 items. It uses characters from a wider visible span of the ASCII range
 (from '!' to '~'). It reserves the end symbols, /!/ and /~/, for
 special dummy end nodes. With this model, we can have keys ranging
-from ~""""""""~ to ~}}}}}}}}~ between the end nodes. 
+from """""""" to }}}}}}}} between the end nodes. 
 
 This gives enormous range size for any practical purposes - virtually
 limitless. For example, if we generate 1000 keys per second then it
