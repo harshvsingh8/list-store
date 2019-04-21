@@ -1,0 +1,274 @@
+
+* Persistent List Store Over No-Sql Database
+
+PersistentListStore implements a key pattern scheme to implement an
+efficient and scalable list/queue store over a no-sql database. The
+underlying assumption is that the database should manage the entries
+in the lexicographical sorted order of the keys. This is typical for
+the most LSM tree based stores like LevelDB or RocksDB. It is
+implemented in C++ using LevelDB as store. It can be easily integrated
+in an existing project with the necessary support. The implementation
+needs to be modified to support a different data store.
+
+** Applications
+
+PersistentListStore is generally useful when the number of items are
+on the higher side. Sorting smaller number of items as list can be
+directly done using object/json array construct and saving the list as
+a single node. But as the number of items grow it gets slower and it
+becomes increasing difficult to scale due to higher IO and Memory
+overhead. In the resource constraint systems, like mobiles, it would
+often lead to thrashing and out of memory crashes.
+
+PersistentListStore addresses the above problem by storing the list
+items over a spread of keys - so only the relevant portion of list is
+accessed or updated as per the actual needs. It can be used for
+storing:
+
+   - Persistent Queue or Stack
+   - Task List
+   - Job/Message Queue
+   - Sorted (LRU/MRU) list
+   - Logs
+   
+** Contract
+
+   - Add item at either ends of the list
+   - Remove item from either ends of the list
+   - Read item from either ends of the list
+   - Determine the current length of the list
+   - Stable keys for the list items: an item's key does not change as
+     long as that item is present in the store.
+   - Read/Remove item directly using its keys (if it is known).
+   - Iterate over all items in either direction.
+   - Insert item in the middle using an iterator position.
+   - Remove items by value
+   - Option to compact the key range (when it is necessary)
+
+As expected, its performance characteristics are similar to the linked
+structured data structure.
+
+|---------------------+-------|
+| Operation           | Order |
+|---------------------+-------|
+| Insert at ends      | O(1)  |
+| Insert at iterator  | O(1)  |
+| Read at either ends | O(1)  |
+| Delete at ends      | O(1)  |
+| Size                | O(n)  |
+| Delete by key       | O(1)  |
+| Delete by value     | O(n)  |
+| Iterator Scan       | O(n)  |
+| Compact             | O(n)  |
+|---------------------+-------|
+
+** API
+
+#+BEGIN_SRC c++
+
+class PersistentList {
+public:
+  static std::shared_ptr<PersistentList> Get(std::shared_ptr<leveldb::DB> db,
+                                             const std::string &listName);
+
+  virtual ~PersistentList();
+
+  inline std::string Id() const { return mListId; }
+
+  std::string Name() const;
+
+  int Size() const;
+
+  std::string PushFront(const std::string &value);
+  std::string PushBack(const std::string &value);
+
+  std::string InsertAt(const PersistentListIterator *iter,
+                       const std::string &value);
+
+  // TODO - move to optional in C++ 17
+  std::pair<bool, std::string> Front() const;
+  std::pair<bool, std::string> Back() const;
+
+  bool PopFront();
+  bool PopBack();
+
+  bool PopKey(const std::string &key);
+  bool PopValue(const std::string &value);
+
+  void Clear();
+  void Delete();
+
+  void Compact();
+}
+
+#+END_SRC
+
+#+BEGIN_SRC c++
+class PersistentListIterator {
+public:
+  PersistentListIterator(std::shared_ptr<PersistentList> list);
+
+  virtual ~PersistentListIterator();
+
+  bool Valid() const;
+
+  std::string Key() const;
+  std::string Value() const;
+
+  bool Next();
+  bool Prev();
+
+  void SeekFront();
+  void SeekBack();
+
+  std::string ListId() const;
+}
+#+END_SRC
+
+** Key Scheme and Design
+
+The store uses a fixed minimum width, /8/, key sequence for the list
+items. It uses characters from a wider visible span of the ASCII range
+(from '!' to '~'). It reserves the end symbols, /!/ and /~/, for
+special dummy end nodes. With this model, we can have keys ranging
+from ~""""""""~ to ~}}}}}}}}~ between the end nodes. 
+
+This gives enormous range size for any practical purposes - virtually
+limitless. For example, if we generate 1000 keys per second then it
+would take around 165 thousand years to exhaust the range!
+
+#+BEGIN_SRC python
+92 ** 8
+5132188731375616
+>>> 5132188731375616 / (12 * 30 * 24 * 3600 * 1000)
+165000.92371963785
+>>> 
+#+END_SRC
+
+Given that we can add items at the both ends we initialize the first
+key for a list in the middle of the range, that is ~NNNNNNNN~.
+
+The new keys at the list ends are generated using either the next or
+the previous immediate lexicographical sequence at the respective
+ends. For example:
+
+ | Operation       | Sequence |
+ |-----------------+----------|
+ | PushBack (init) | NNNNNNNN |
+ | PushBack        | NNNNNNNO |
+ | PushFront       | NNNNNNNM |
+ | PushBack        | NNNNNNNP |
+ | PushBack        | NNNNNNNQ |
+ | PushFront       | NNNNNNNK |
+
+Generating keys for the middle of list sequence is a special case. It
+is done in order to maintain the key stability of the existing items.
+
+  1. Extract two neighboring keys' sequences, K1 and K2
+  2. Append the base starting symbol, '"', to the shorter length key,
+     so that both keys are made of the same length.
+  3. Find the difference between K1 and K2, divide by 2 to find the
+     offset.
+  4. If offset is 0, then it means that the original K1 and K2 were of
+     same length and in sequence (a common case). In this case, the
+     new key is generated by extending K1 by one character and use
+     middle symbol of the base range ('N').
+  5. When offset is > 0, then perform /K1 + offset/ in the custom
+     base, /92/, to generate the middle key's sequence.
+ 
+Example:
+
+ | Operation       | SEQ        |
+ |-----------------+------------|
+ | PushBack (init) | NNNNNNNN   |
+ | PushBack        | NNNNNNN0   |
+ | Insert - at 1   | NNNNNNNNN  |
+ | Insert - at 1   | NNNNNNNN8  |
+
+Check test cases in ~dbtest.cpp~ for more realistic use cases.
+
+The store keys are managed as following:
+
+|---------------------+-----------------------+----------------------------------------|
+| KEY PATTERN         | SAMPLE                | NOTE                                   |
+|---------------------+-----------------------+----------------------------------------|
+| pl/next_id          | pl/next_id    -> 3    | next list id to use                    |
+| pl/$LIST_NAME/id    | pl/MyTasks/id -> 2    | list id for the given list name        |
+| pl/$LIST_ID/!       | pl/2/!        -> 42   | dummy head node                        |
+| pl/$LIST_ID/~       | pl/2/~        -> 42   | dummy tail node                        |
+| pl/$LIST_ID/KEY_SEQ | pl/2/NNNNNNNN -> data | first item key, using middle key value |
+|---------------------+-----------------------+----------------------------------------|
+
+Note:
+ 1. All neighboring keys share the maximum prefix so they are
+    optimally stored in the compressed form in the database. LevelDB
+    tracks only the suffix change for the neighboring keys in a block.
+ 2. As all the neighboring keys are co-located so a disk page will
+    load a set of neighboring list items. This gives big performance
+    with less IO overhead while iterating over the list items.
+
+** Appendix 
+
+*** Important Constants
+
+#+BEGIN_SRC c++
+ KEY_BASE = 92;
+ KEY_LEN = 8;
+ START_SYM = '!';
+ END_SYM = '~';
+ MIDDLE_SYM = 'N';
+ ASCII_OFFSET = 34;
+ INIT_KEY_SEQ = "NNNNNNNN";
+#+END_SRC
+
+*** ASCII Table
+
+#+BEGIN_SRC log
+
+Dec  Char                           Dec  Char     Dec  Char     Dec  Char
+---------                           ---------     ---------     ----------
+  0  NUL (null)                      32  SPACE     64  @         96  `
+  1  SOH (start of heading)          33  !         65  A         97  a
+  2  STX (start of text)             34  "         66  B         98  b
+  3  ETX (end of text)               35  #         67  C         99  c
+  4  EOT (end of transmission)       36  $         68  D        100  d
+  5  ENQ (enquiry)                   37  %         69  E        101  e
+  6  ACK (acknowledge)               38  &         70  F        102  f
+  7  BEL (bell)                      39  '         71  G        103  g
+  8  BS  (backspace)                 40  (         72  H        104  h
+  9  TAB (horizontal tab)            41  )         73  I        105  i
+ 10  LF  (NL line feed, new line)    42  *         74  J        106  j
+ 11  VT  (vertical tab)              43  +         75  K        107  k
+ 12  FF  (NP form feed, new page)    44  ,         76  L        108  l
+ 13  CR  (carriage return)           45  -         77  M        109  m
+ 14  SO  (shift out)                 46  .         78  N        110  n
+ 15  SI  (shift in)                  47  /         79  O        111  o
+ 16  DLE (data link escape)          48  0         80  P        112  p
+ 17  DC1 (device control 1)          49  1         81  Q        113  q
+ 18  DC2 (device control 2)          50  2         82  R        114  r
+ 19  DC3 (device control 3)          51  3         83  S        115  s
+ 20  DC4 (device control 4)          52  4         84  T        116  t
+ 21  NAK (negative acknowledge)      53  5         85  U        117  u
+ 22  SYN (synchronous idle)          54  6         86  V        118  v
+ 23  ETB (end of trans. block)       55  7         87  W        119  w
+ 24  CAN (cancel)                    56  8         88  X        120  x
+ 25  EM  (end of medium)             57  9         89  Y        121  y
+ 26  SUB (substitute)                58  :         90  Z        122  z
+ 27  ESC (escape)                    59  ;         91  [        123  {
+ 28  FS  (file separator)            60  <         92  \        124  |
+ 29  GS  (group separator)           61  =         93  ]        125  }
+ 30  RS  (record separator)          62  >         94  ^        126  ~
+ 31  US  (unit separator)            63  ?         95  _        127  DEL
+
+#+END_SRC
+
+** Building
+
+The project /cannot/ be build as is as it refers to a local LevelDB
+and GTest setup. CMakelist.txt needs to be updated to adjust include
+and link path appropriately.
+
+
+
+
+
