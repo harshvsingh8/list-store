@@ -1,15 +1,17 @@
 
 * Persistent List Store Over No-Sql Database
 
-/PersistentListStore/ implements an efficient and scalable list store
-using LevelDB. It is based on the assumption that the database is
-managing the key-value entries in the lexicographical order of its
-keys. This is typical for the most LSM tree based stores like LevelDB
-or RocksDB.
+/PersistentListStore/ implements an efficient and scalable list
+storage using LevelDB. It is based on the assumption that the database
+manages the key-value entries in the lexicographical order of its keys
+and the items are presented in that order when iterating over a key
+range. It devices a key sequence generating scheme to realize list
+semantics.
 
-The code can be easily integrated in an existing project where a
-reference to the LevelDB database is available. The implementation
-however needs to be modified to support a different database.
+The code can be easily integrated where a reference to the LevelDB
+database is available. The implementation however needs to be modified
+to support a different database (most LSM tree based databases manage
+and present keys in the lexicographical order).
 
 ** Applications
 
