@@ -1,5 +1,5 @@
 
-* Persistent List Store Over No-Sql Database
+* List Store Over No-Sql Database
 
 /PersistentListStore/ implements an efficient and scalable list
 storage using LevelDB. It is based on the assumption that the database
