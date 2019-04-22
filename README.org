@@ -1,29 +1,29 @@
 
 * Persistent List Store Over No-Sql Database
 
-PersistentListStore implements a key pattern scheme to implement an
-efficient and scalable list/queue store over a no-sql database. The
-underlying assumption is that the database should manage the entries
-in the lexicographical sorted order of the keys. This is typical for
-the most LSM tree based stores like LevelDB or RocksDB. It is
-implemented in C++ using LevelDB as store. It can be easily integrated
-in an existing project with the necessary support. The implementation
-needs to be modified to support a different data store.
+/PersistentListStore/ implements an efficient and scalable list store
+using LevelDB. It is based on the assumption that the database is
+managing the key-value entries in the lexicographical order of its
+keys. This is typical for the most LSM tree based stores like LevelDB
+or RocksDB.
+
+The code can be easily integrated in an existing project where a
+reference to the LevelDB database is available. The implementation
+however needs to be modified to support a different database.
 
 ** Applications
 
-PersistentListStore is generally useful when the number of items are
-on the higher side. Sorting smaller number of items as list can be
-directly done using object/json array construct and saving the list as
-a single node. But as the number of items grow it gets slower and it
-becomes increasing difficult to scale due to higher IO and Memory
-overhead. In the resource constraint systems, like mobiles, it would
-often lead to thrashing and out of memory crashes.
+/PersistentListStore/ is useful when the number of items are on the
+higher side. Storing smaller number of items in a list can be directly
+done using object/json array construct (saving the list as a single
+node). But as the number of items grow it gets slower and it becomes
+increasing difficult to scale due to higher IO and Memory overhead. In
+the resource constraint systems, like mobiles, it would lead to
+thrashing and out of memory crashes.
 
-PersistentListStore addresses the above problem by storing the list
+/PersistentListStore/ addresses the above problem by storing the list
 items over a spread of keys - so only the relevant portion of list is
-accessed or updated as per the actual needs. It can be used for
-storing:
+accessed or updated as per the actual needs. It can be used as:
 
    - Persistent Queue or Stack
    - Task List
@@ -45,7 +45,7 @@ storing:
    - Remove items by value
    - Option to compact the key range (when it is necessary)
 
-As expected, its performance characteristics are similar to the linked
+As expected, its performance characteristics are similar to a linked
 structured data structure.
 
 |---------------------+-------|
@@ -127,13 +127,13 @@ public:
 
 ** Key Scheme and Design
 
-The store uses a fixed minimum width, /8/, key sequence for the list
-items. It uses characters from a wider visible span of the ASCII range
-(from '!' to '~'). It reserves the end symbols, /!/ and /~/, for
-special dummy end nodes. With this model, we can have keys ranging
-from """""""" to }}}}}}}} between the end nodes. 
+The store uses a fixed minimum width, /8/, key sequence. It uses
+characters from a wider printable span of the ASCII range (from '!' to
+'~'). It reserves the end symbols, /!/ and /~/, for special dummy end
+nodes. With this model, we have keys ranging from """""""" to }}}}}}}}
+between the end nodes.
 
-This gives enormous range size for any practical purposes - virtually
+This gives enormous range for any practical purposes - it is virtually
 limitless. For example, if we generate 1000 keys per second then it
 would take around 165 thousand years to exhaust the range!
 
@@ -146,11 +146,13 @@ would take around 165 thousand years to exhaust the range!
 #+END_SRC
 
 Given that we can add items at the both ends we initialize the first
-key for a list in the middle of the range, that is ~NNNNNNNN~.
+key for a list in the middle of the range. The very first key sequence
+for a new list is: ~NNNNNNNN~. ~N~ is the middle character in the code
+span between ~"~ and ~}~.
 
 The new keys at the list ends are generated using either the next or
-the previous immediate lexicographical sequence at the respective
-ends. For example:
+the previous immediate lexicographical sequence of the existing keys
+at the respective ends. For example:
 
  | Operation       | Sequence |
  |-----------------+----------|
@@ -200,12 +202,13 @@ The store keys are managed as following:
 |---------------------+-----------------------+----------------------------------------|
 
 Note:
- 1. All neighboring keys share the maximum prefix so they are
-    optimally stored in the compressed form in the database. LevelDB
-    tracks only the suffix change for the neighboring keys in a block.
+ 1. All neighboring keys share the maximum prefix so in the database
+    they can be stored in a optimal fashion. LevelDB tracks only the
+    suffix change for the neighboring keys in a block.
  2. As all the neighboring keys are co-located so a disk page will
-    load a set of neighboring list items. This gives big performance
-    with less IO overhead while iterating over the list items.
+    load a set of neighboring list items. This delivers better
+    performance with less IO overhead when iterating over the list
+    items.
 
 ** Appendix 
 
@@ -264,9 +267,9 @@ Dec  Char                           Dec  Char     Dec  Char     Dec  Char
 
 ** Building
 
-The project /cannot/ be build as is as it refers to a local LevelDB
-and GTest setup. CMakelist.txt needs to be updated to adjust include
-and link path appropriately.
+The project /cannot/ be build as is; it refers to a local LevelDB and
+GTest setup. CMakelist.txt needs to be updated to fix include and link
+path appropriately.
 
 
 
