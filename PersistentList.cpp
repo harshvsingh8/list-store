@@ -54,7 +54,7 @@ PersistentList::PersistentList(std::shared_ptr<leveldb::DB> db,
 std::string PersistentList::Name() const { return mListName; }
 
 int PersistentList::Size() const {
-  leveldb::Iterator *iter = mDB->NewIterator(mReadOptions);
+  auto iter = unique_ptr<leveldb::Iterator>(mDB->NewIterator(mReadOptions));
   iter->Seek(mHeadKey);
   int count = 0;
 
@@ -71,7 +71,7 @@ int PersistentList::Size() const {
 }
 
 std::string PersistentList::PushFront(const std::string &value) {
-  leveldb::Iterator *iter = mDB->NewIterator(mReadOptions);
+  auto iter = unique_ptr<leveldb::Iterator>(mDB->NewIterator(mReadOptions));
   iter->Seek(mHeadKey);
   iter->Next();
   string firstKey = iter->key().ToString();
