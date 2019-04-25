@@ -2,7 +2,6 @@
 #include "PersistentListIterator.h"
 #include "leveldb/db.h"
 
-#include <cmath>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -20,13 +19,13 @@ PersistentList::PersistentList(std::shared_ptr<leveldb::DB> db,
     : mDB(db), mListName(listName) {
   using namespace leveldb;
 
-  string idKey(string("pl/") + mListName + "/id");
+  string idKey(KEY_PREFIX + mListName + "/id");
   string idValue;
   Status s = mDB->Get(mReadOptions, idKey, &idValue);
 
   if (s.IsNotFound()) {
     // cout << "PersistentList: Creating new list for:" << listName << endl;
-    string nextListIdKey("pl/next_id");
+    string nextListIdKey(string(KEY_PREFIX) +  "next_id");
     string listId;
     s = mDB->Get(mReadOptions, nextListIdKey, &listId);
 
@@ -40,14 +39,14 @@ PersistentList::PersistentList(std::shared_ptr<leveldb::DB> db,
 
     mDB->Put(mWriteOptions, idKey, listId);
     mListId = listId;
-    mKeyPrefix = string("pl/") + mListId + "/"; // needed by GetKey()
+    mKeyPrefix = KEY_PREFIX + mListId + "/"; // needed by GetKey()
     mDB->Put(mWriteOptions, GetKey(string(1, START_SYM)), "42");
     mDB->Put(mWriteOptions, GetKey(string(1, END_SYM)), "42");
     // cout << "PersistentList: Created new list with Id:" << idValue << endl;
   } else {
     mListId = idValue;
   }
-  mKeyPrefix = string("pl/") + mListId + "/";
+  mKeyPrefix = KEY_PREFIX + mListId + "/";
   mHeadKey = GetKey(string(1, START_SYM));
   mTailKey = GetKey(string(1, END_SYM));
 }
@@ -293,7 +292,7 @@ std::string PersistentList::MidKey(const std::string &key1,
   }
 
   long long diff = 0;
-
+  long long posVal = 1;
   for (int i = maxKeyLen - 1, carry = 0; i >= 0; i--) {
     int val = key2Data[i] - key1Data[i] - carry;
     carry = 0;
@@ -301,7 +300,8 @@ std::string PersistentList::MidKey(const std::string &key1,
       val += KEY_BASE;
       carry = 1;
     }
-    diff += val * (long long)(pow(KEY_BASE, (maxKeyLen - 1) - i));
+    diff += val * posVal;
+    posVal *= KEY_BASE;
   }
 
   long long offset = diff / 2;
@@ -309,7 +309,7 @@ std::string PersistentList::MidKey(const std::string &key1,
 
   if (offset == 0) {
     // there is no space, expand the key and return
-    return key1 + "N";
+    return key1 + MIDDLE_SYM;
   }
 
   vector<int> offsetData(maxKeyLen, 0);

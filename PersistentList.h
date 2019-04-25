@@ -68,6 +68,7 @@ private:
   static constexpr char END_SYM = '~';
   static constexpr char MIDDLE_SYM = 'N';
   static constexpr int ASCII_OFFSET = 34;
+  static constexpr const char *KEY_PREFIX = "pl/";
   static constexpr const char *INIT_KEY_SEQ = "NNNNNNNN";
 
   std::shared_ptr<leveldb::DB> mDB;
